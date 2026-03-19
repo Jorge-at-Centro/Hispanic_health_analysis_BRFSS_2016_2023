@@ -2,3 +2,6 @@
 .Rhistory
 .RData
 .Ruserdata
+./data/LLCP2016.XPT
+./data/LLCP2023.XPT
+data/*.XPT

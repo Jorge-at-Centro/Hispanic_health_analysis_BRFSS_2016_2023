@@ -1,0 +1,243 @@
+---
+title: "Data Wrangling BRFSS Data"
+author: "Jorge R. Soldevila Irizarry"
+date: "`r Sys.Date()`"
+output: github_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Disable scientific notation globally
+options(scipen = 999)
+```
+
+# Library Setup
+
+```{r Library setup, warning=FALSE,message=FALSE}
+
+# Install pacman if not already installed on the system. This will allow us to install desired libraries. 
+if (!require("pacman")) install.packages("pacman")
+
+# Load libraries using p_load(), which installs missing packages and loads
+#libraries.
+pacman::p_load(tidyverse,     # For data manipulation
+               janitor,       # For cleaning column names
+               survey,        # For analyzing complex survey designs
+               broom,         # For tidying statistical model outputs into 
+                              # data frames
+               haven,         # For reading SAS Transport files, like BRFSS data
+               cdlTools,      # For converting FIPS codes to state abbreviations
+               expss,         # For adding variable and value labels to data frames
+               openxlsx,      # For exporting data frames to Excel files
+               glue,           # For easy string interpolation
+               here           #For dynamic file path
+               )
+```
+
+# State Parameter Setup
+
+Define states of interest. Our analysis focuses on Hispanic population
+in states where Puerto Ricans are most present: Florida and New York. As
+well as analyzing Hispanics in Puerto Rico.
+
+```{r State setup, message=FALSE, warning=FALSE}
+
+#Define a vector containing numeric FIPS codes of state of interest.
+#To find FIPS code for desired state visit: 
+#https://transition.fcc.gov/oet/info/maps/census/fips/fips.txt
+
+#We are interested in three states and state equivalent: Puerto Rico, Florida, 
+#and New York
+target_fips <- c(12, #Florida
+                 36, #New York
+                 72) #Puerto Rico
+
+
+```
+
+# Data Loading and Wrangling
+
+## Path configuration
+
+```{r Data and Output path, warning=FALSE, message=FALSE}
+# Use here() to point to the data and output folders relative to the project root
+data_path <- here("data")
+output_path <- here("data") # Saving the processed RDS back to the data folder
+```
+
+## Read in Data
+
+Here we call our data from our local folder and select desired
+variables. Additionally we filter our data sets for our desired states
+using the state vector created in the previous section. The objects
+containing 2016 and 2023 are combined for use in the analysis.
+
+```{r Data prep, warning=FALSE, message=FALSE}
+
+# --- 2016 Data Processing ---
+
+# Read and subset 2016
+df_2016 <- read_xpt(file.path(data_path, "LLCP2016.XPT")) %>% 
+  select(`_STATE`,`_PSU`,`_STSTR`,`_LLCPWT`,`_HISPANC`,`_MRACE1`, GENHLTH,
+         `_PHYS14D`,ADDEPEV2, `_LTASTH1`, DIABETE3, `_MICHD`, CHCSCNCR, CHCOCNCR,
+         HLTHPLN1) %>% 
+  filter(`_STATE` %in% target_fips) %>%
+  mutate(year = factor(2016)) %>%
+  clean_names()
+
+# --- 2023 Data Processing ---
+
+# Read, subset, and standardize 2023 column names to match 2016.
+df_2023 <- read_xpt(file.path(data_path, "LLCP2023.XPT")) %>% 
+  select(`_STATE`,`_PSU`,`_STSTR`,`_LLCPWT`,`_HISPANC`,`_MRACE1`, GENHLTH,
+         `_PHYS14D`,ADDEPEV3, `_LTASTH1`, DIABETE4, `_MICHD`, CHCSCNC1, CHCOCNC1,
+         `_HLTHPL1`) %>% 
+  filter(`_STATE` %in% target_fips) %>%
+  rename(ADDEPEV2 = ADDEPEV3, 
+         DIABETE3 = DIABETE4,
+         CHCSCNCR = CHCSCNC1,
+         CHCOCNCR = CHCOCNC1,
+         HLTHPLN1 = `_HLTHPL1`) %>% 
+  mutate(year = factor(2023)) %>%
+  clean_names()
+
+# --- Combine Data ---
+
+# Stack the 2016 and 2023 datasets on top of each other into one large dataframe
+df_combined <- bind_rows(df_2016, df_2023)
+
+# Convert state FIPS to Abbreviation
+df_combined$state <- fips(df_combined$state, to = 'Abbreviation')
+```
+
+# Create new variables
+
+We created simplified versions of certain variables to facilitate
+analysis. Additionally we create a Race and Ethnicity variable upon
+which our analysis will be based on.
+
+```{r New vars, message=FALSE, warning=FALSE}
+
+    # Group simplified variables for General Health and Diabetes responses
+df_combined <- df_combined %>%
+  mutate(
+    genhlth2 = case_when(genhlth %in% 1:3 ~ 1,
+                         genhlth %in% 4:5 ~ 2,
+                         TRUE ~ genhlth),
+    diabetes = case_when(diabete3 %in% 1:2 ~ 1,
+                         diabete3 == 3 ~ 2,
+                         TRUE ~ diabete3),
+    
+    # Create a new variable that combines Race and Hispanic variables to create a 
+    #new race and ethnicity variable. 
+    racexhisp = case_when(
+      hispanc == 1 & mrace1 %in% 1:7 ~ mrace1,
+      hispanc == 1 & mrace1 == 77 ~ 8,
+      hispanc == 1 & mrace1 == 99 ~ 9,
+      hispanc == 2 & mrace1 %in% 1:7 ~ mrace1 + 9,
+      hispanc == 2 & mrace1 == 77 ~ 17,
+      hispanc == 2 & mrace1 == 99 ~ 18,
+      TRUE ~ NA_real_
+    )
+  )
+```
+
+# Adding labels
+
+Labels are added to our variables to ease interpretation.
+
+```{r Labelling, message=FALSE, warning=FALSE}
+
+#Add labels to numeric codes to faciliate analysis when results are exported.
+df_combined <- apply_labels(df_combined,
+  racexhisp = "Hispanic by Race",
+  racexhisp = c("Hispanic White"=1, 
+                "Hispanic Black"=2, 
+                "Hispanic AIAN"=3, 
+                "Hispanic Asian"=4, 
+                "Hispanic NHPI"=5, 
+                "Hispanic Other"=6, 
+                "Hispanic Multirracial"=7, 
+                "Hispanic Not Sure"=8, 
+                "Hispanic Refused"=9, 
+                "Non Hispanic White"=10, 
+                "Non Hispanic Black"=11,
+                "Non Hispanic AIAN"=12, 
+                "Non Hispanic Asian"=13, 
+                "Non Hispanic NHPI"=14, 
+                "Non Hispanic Other"=15, 
+                "Non Hispanic Multirracial"=16, 
+                "Non Hispanic Not Sure"=17, 
+                "Non Hispanic Refused"=18),
+  genhlth = c("Excellent"=1, 
+              "Very Good"=2, 
+              "Good"=3, 
+              "Fair"=4, 
+              "Poor"=5, 
+              "Dont know"=7, 
+              "Refused"=9),
+  genhlth2 = c("Good"=1, 
+               "Fair/Poor"=2, 
+               "Dont know"=7, 
+               "Refused"=9),
+  phys14d = c("Zero Days"=1, 
+              "1 to 13 Days"=2, 
+              "14+ Days"=3, 
+              "Dont know"=9),
+  addepev2 = c("Yes"=1, 
+               "No"=2, 
+               "Dont know"=7, 
+               "Refused"=9),
+  ltasth1 = c("No"=1, 
+              "Yes"=2, 
+              "Dont know"=7),
+  diabete3 = c("Yes"=1, 
+               "Yes,during pregnancy"=2, 
+               "No"=3, "Pre-diabetes"=4, 
+               "Dont know"=7, 
+               "Refused"=9),
+  diabetes = c("Yes"=1, 
+               "No"=2, 
+               "Dont know"=7, 
+               "Refused"=9),
+  michd = c("Yes"=1, 
+            "No"=2),
+  chcscncr = c("Yes"=1, 
+               "No"=2, 
+               "Dont know"=7, 
+               "Refused"=9),
+  chcocncr = c("Yes"=1, 
+               "No"=2, 
+               "Dont know"=7, 
+               "Refused"=9),
+  hlthpln1 = c("Yes"=1, 
+               "No"=2, 
+               "Dont know"=7, 
+               "Refused"=9)
+)
+
+```
+
+# Convert targeted variables to factors
+
+```{r Convert vars to factor, message=FALSE, warning=FALSE}
+# Create a list of all the variables we want to treat as categorical factors
+
+factor_vars <- c("racexhisp", "genhlth", "genhlth2", "phys14d",
+"addepev2", "ltasth1", "diabete3", "diabetes", "michd", "chcscncr",
+"chcocncr", "hlthpln1")
+
+#Convert to factor 
+df_combined[factor_vars] <- lapply(df_combined[factor_vars], as.factor)
+
+```
+
+# Save processed data
+
+```{r Save data, message=FALSE, warning=FALSE}
+saveRDS(df_combined, file.path(output_path, "df_combined_cleaned.rds"))
+```
