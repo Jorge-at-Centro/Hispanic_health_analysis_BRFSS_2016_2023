@@ -1,7 +1,7 @@
 Data Wrangling BRFSS Data
 ================
 Jorge R. Soldevila Irizarry
-2026-03-18
+2026-03-24
 
 # Library Setup
 
@@ -65,9 +65,22 @@ containing 2016 and 2023 are combined for use in the analysis.
 
 # Read and subset 2016
 df_2016 <- read_xpt(file.path(data_path, "LLCP2016.XPT")) %>% 
-  select(`_STATE`,`_PSU`,`_STSTR`,`_LLCPWT`,`_HISPANC`,`_MRACE1`, GENHLTH,
-         `_PHYS14D`,ADDEPEV2, `_LTASTH1`, DIABETE3, `_MICHD`, CHCSCNCR, CHCOCNCR,
-         HLTHPLN1) %>% 
+  select(`_STATE`,              # Contains State FIPS Codes
+         `_PSU`,                # Primary Sampling Unit
+         `_STSTR`,              # Sample Design Stratification Variable
+         `_LLCPWT`,             # Final Weight
+         `_HISPANC`,            # Hispanic, Latino/a, or Spanish Origin Calculated
+         `_MRACE1`,             # Calculated Race
+          GENHLTH,              # General Health
+         `_PHYS14D`,            # Physical Health
+         ADDEPEV2,              # Ever told you had a depressive disorder 
+         `_LTASTH1`,            # Ever told they have asthma
+         DIABETE3,              # Ever told you have diabetes
+         `_MICHD`,              # Ever had coronary heart disease or myocardial
+                                # infarction
+         CHCSCNCR,              # Ever told you had skin cancer
+         CHCOCNCR,              # Ever told you had other type of cancer
+         HLTHPLN1) %>%          # Have any health care coverage
   filter(`_STATE` %in% target_fips) %>%
   mutate(year = factor(2016)) %>%
   clean_names()
@@ -75,12 +88,16 @@ df_2016 <- read_xpt(file.path(data_path, "LLCP2016.XPT")) %>%
 # --- 2023 Data Processing ---
 
 # Read, subset, and standardize 2023 column names to match 2016.
+#Selected variables for 2023 are the same as those selected in 2016.
+
 df_2023 <- read_xpt(file.path(data_path, "LLCP2023.XPT")) %>% 
   select(`_STATE`,`_PSU`,`_STSTR`,`_LLCPWT`,`_HISPANC`,`_MRACE1`, GENHLTH,
          `_PHYS14D`,ADDEPEV3, `_LTASTH1`, DIABETE4, `_MICHD`, CHCSCNC1, CHCOCNC1,
          `_HLTHPL1`) %>% 
   filter(`_STATE` %in% target_fips) %>%
-  rename(ADDEPEV2 = ADDEPEV3, 
+  #Because variable names changed from 2016 to 2023, we rename the changed varriable
+  #names to mathc the 2016 nomenclature. 
+  rename(ADDEPEV2 = ADDEPEV3,   
          DIABETE3 = DIABETE4,
          CHCSCNCR = CHCSCNC1,
          CHCOCNCR = CHCOCNC1,

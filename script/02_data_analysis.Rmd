@@ -10,6 +10,12 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # Disable scientific notation globally
 options(scipen = 999)
+
+# Define target BRFSS health indicators for analysis. 
+# These represent categorical responses for general health, asthma, diabetes, 
+# coronary heart disease, cancer, and healthcare coverage status.
+health_vars <- c("genhlth", "genhlth2", "addepev2", "ltasth1", "diabete3", 
+                 "diabetes", "michd", "chcscncr", "chcocncr", "hlthpln1")
 ```
 
 # Library Setup
@@ -31,7 +37,7 @@ pacman::p_load(tidyverse,     # For data manipulation
                expss,         # For adding variable and value labels to data frames
                openxlsx,      # For exporting data frames to Excel files
                glue,          # For easy string interpolation
-               here           #For dynamic file path
+               here           # For dynamic file path
                )
 ```
 
@@ -40,19 +46,21 @@ pacman::p_load(tidyverse,     # For data manipulation
 ## Path configuration
 
 ```{r Path config, message=FALSE,warning=FALSE}
-# Ensure the outputs directory exists before running
+# Use here() to point to the data and output folders relative to the project root
 data_path <- here("data")
 output_path <- here("outputs")
+
+# Ensure the outputs directory exists before running to prevent export errors.
 if (!dir.exists(output_path)) dir.create(output_path)
 ```
 
 ## Load data
 
+We will load the cleaned data set we saved as .RDS in `01_data_wrangling.Rmd`.
+
 ```{r Load data, message= FALSE, warning=FALSE}
-#Load Processed Data
+#Load Processed Data from RDS.
 df_combined <- readRDS(file.path(data_path, "df_combined_cleaned.rds"))
-health_vars <- c("genhlth", "genhlth2", "addepev2", "ltasth1", "diabete3", 
-                 "diabetes", "michd", "chcscncr", "chcocncr", "hlthpln1")
 ```
 
 # Helper Functions
@@ -61,7 +69,15 @@ We create helper functions that will be used to generate total population counts
 
 ```{r Helper functions, message=FALSE, warning=FALSE}
 
-# 1. Totals helper
+#' Generate Population Totals by Race and Ethnicity
+#' 
+#' Iterates over a list of variables to calculate estimated population totals 
+#' across race/ethnicity categories using the complex survey design.
+#'
+#' @param design A survey design object created via svydesign().
+#' @param vars A character vector of target health variables.
+#' @return A named list of `svyby` objects containing the calculated totals.
+
 get_totals <- function(design, vars) {
   results <- lapply(vars, function(v) {
     form <- as.formula(paste0("~", v))
@@ -71,7 +87,16 @@ get_totals <- function(design, vars) {
   return(results)
 }
 
-# 2. Means and CI helper
+#' Calculate Proportions and Confidence Intervals
+#' 
+#' Generates weighted proportions of the population that responded to each 
+#' health condition, broken down by race and ethnicity, along with 
+#' their corresponding Standard Errors and Confidence Intervals.
+#'
+#' @param design A survey design object created via svydesign().
+#' @param vars A character vector of target health variables.
+#' @return A named list of tidy data frames containing means, SEs, and CIs.
+
 get_means_and_ci <- function(design, vars) {
   results <- lapply(vars, function(v) {
     form <- as.formula(paste0("~", v))
@@ -101,7 +126,17 @@ get_means_and_ci <- function(design, vars) {
   return(results)
 }
 
-# 3. T-Test helper
+#' Run T-Tests Across Survey Years
+#' 
+#' Performs t-tests to determine if differences in health condition responses 
+#' between the two survey years are statistically significant within each 
+#' race/ethnicity group.
+#'
+#' @param var_name The specific health variable to test (character string).
+#' @param design A survey design object encompassing both years.
+#' @param race_groups A character vector of the race/ethnicity levels.
+#' @return A single bound data frame containing t-statistics, p-values, and CIs.
+
 run_ttests <- function(var_name, design, race_groups) {
   var_levels <- levels(design$variables[[var_name]])
   results_list <- list()
@@ -113,6 +148,8 @@ run_ttests <- function(var_name, design, race_groups) {
     for (lvl in var_levels) {
       formula_obj <- as.formula(paste0("I(", var_name, " == '", lvl, "') ~ year"))
       
+      # Use tryCatch to gracefully handle cases where a sub-group lacks enough 
+      # variance or data to compute a t-test
       test_result <- tryCatch({
         svyttest(formula_obj, sub_desgn)
       }, error = function(e) NULL)
@@ -139,7 +176,8 @@ run_ttests <- function(var_name, design, race_groups) {
 
 ```{r State Analysis, message=FALSE, warning=FALSE}
 
-# Adjust settings globally
+# Adjust variance estimation globally for strata containing only a single 
+# primary sampling unit (PSU) to prevent standard error calculation failures.
 options(survey.lonely.psu="adjust")
 
 # Identify the states available in the filtered dataset
@@ -153,7 +191,9 @@ for (current_state in available_states) {
   df_state <- df_combined %>% filter(state == current_state)
   race_levels <- levels(df_state$racexhisp)
   
-  # Build Survey Design for current state
+  # Define the complex survey design for the current state.
+  # We interact the stratum variable (ststr) with year to ensure strata 
+  # are properly nested and distinct across the two different survey years.
   state_dsgn <- svydesign(id = ~psu,
                           strata = ~interaction(ststr, year),
                           weights = ~llcpwt,
@@ -163,28 +203,28 @@ for (current_state in available_states) {
   dsgn_2016 <- subset(state_dsgn, year == 2016)
   dsgn_2023 <- subset(state_dsgn, year == 2023)
   
-  # --- 1. Calculate Totals by Race ---
+  # --- 1. Export Population Distributions by Race ---
   totals_2016 <- svytable(~racexhisp, dsgn_2016, na.rm=TRUE)
   write.xlsx(totals_2016, file.path(output_path,glue("totals_2016_race_{current_state}.xlsx"))) 
   
   totals_2023 <- svytable(~racexhisp, dsgn_2023, na.rm=TRUE)
   write.xlsx(totals_2023, file.path(output_path,glue("totals_2023_race_{current_state}.xlsx")))
   
-  # --- 2. Calculate Totals by Race and Health Category ---
+  # --- 2. Export Cross-tabulated Totals by Race and Health Category ---
   total_2016_list <- get_totals(dsgn_2016, health_vars)
   write.xlsx(total_2016_list, file.path(output_path,glue("totals_2016_hlth_list_{current_state}.xlsx")))
   
   total_2023_list <- get_totals(dsgn_2023, health_vars)
   write.xlsx(total_2023_list, file.path(output_path,glue("totals_2023_hlth_list_{current_state}.xlsx")))
   
-  # --- 3. Calculate Means by Race and Health Category ---
+  # --- 3. Export Weighted Means and CIs by Race and Health Category ---
   mean_ci_2016_list <- get_means_and_ci(dsgn_2016, health_vars)
   write.xlsx(mean_ci_2016_list, file.path(output_path,glue("mean_and_ci_2016_{current_state}.xlsx")))
   
   mean_ci_2023_list <- get_means_and_ci(dsgn_2023, health_vars)
   write.xlsx(mean_ci_2023_list, file.path(output_path,glue("mean_and_ci_2023_{current_state}.xlsx")))
   
-  # --- 4. Testing for Significance Differences ---
+  # --- 4. Export T-Test Results: 2016 vs 2023 Significance Testing ---
   all_ttest_results <- lapply(health_vars, function(var) {
     run_ttests(var, state_dsgn, race_levels)
   })
