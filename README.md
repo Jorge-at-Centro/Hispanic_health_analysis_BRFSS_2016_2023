@@ -31,4 +31,4 @@ Running `02_data_analysis.Rmd` will output several .xlxs files containing result
 
 # NOTE
 
-Google Gemini was used to refactor code and improved helper functions.
+Google Gemini was used to refactor the code used for the analysis by helping create helper functions that calculated and performed statistical analysis and reducing repetitive code.
