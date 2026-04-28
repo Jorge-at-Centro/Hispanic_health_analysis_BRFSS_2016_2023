@@ -29,6 +29,6 @@ Our analysis focuses on a set of desired variables, which are filtered for when 
 
 Running `02_data_analysis.Rmd` will output several .xlxs files containing results from our total estimates and statistical analysis. Results are exported in this manner because they facilitated usability for the research team. Results from our analysis are already included in the outputs folder and can be used to visualize and analyze results.
 
-# NOTE
+# AI Declaration
 
-Google Gemini was used to refactor the code used for the analysis by helping create helper functions that calculated and performed statistical analysis and reducing repetitive code.
+AI was not used to generate any text or images or visualizations of any kinds, including tables, nor was AI used to analyze or extract insights from the data analyzed. However, AI was used to optimize the code used to run the statistical tool with which we analyzed the data. Specifically, the research team used Google’s Gemini 3.1 Pro to refractor the original code used perform the statistical analysis of the BRFSS data using R version 4.5.3. Gemini was employed to create helper functions that reduced repetitive coding operations, harmonizing the R commands, to calculate the Student T-Test across the several ethnoracial categories for all health indicators.
